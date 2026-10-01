@@ -249,13 +249,13 @@
                 </div>
             </div>
 
-            <!-- 4단계: 분석 대상지 지정 (선택사항) -->
+            <!-- 4단계: 분석 대상지 지정 (다중 대상지 레이어 지원) -->
             <div class="bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 space-y-3">
                 <h3 class="font-bold text-sm text-slate-300 flex items-center gap-2">
                     <span class="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs">4</span>
-                    분석 대상지 지정 (선택사항)
+                    분석 대상지 지정 (다중 선택 가능)
                 </h3>
-                <p class="text-[11px] text-slate-400 leading-relaxed">대상지를 지정하면 해당 영역 내의 측정점만 결과 마커로 출력됩니다. 지정하지 않으면 전체 영역이 분석됩니다.</p>
+                <p class="text-[11px] text-slate-400 leading-relaxed">여러 개의 대상지 영역을 각각 등록할 수 있습니다. 지정하지 않으면 전체 영역이 분석됩니다.</p>
                 <div class="grid grid-cols-2 gap-2">
                     <button id="btn-draw-target" class="bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-slate-950 font-semibold py-2 px-3 rounded-lg text-xs transition-all flex items-center justify-center gap-1.5 shadow">
                         <i class="fa-solid fa-draw-polygon"></i> 대상지 그리기
@@ -264,8 +264,16 @@
                         <i class="fa-solid fa-rotate-left"></i> 대상지 초기화
                     </button>
                 </div>
-                <div id="target-status" class="text-[11px] text-slate-400 font-mono bg-slate-900 p-2 rounded border border-slate-800 truncate">
-                    지정된 대상지 없음 (전체 영역 분석)
+
+                <!-- 대상지(레이어) 관리 패널 -->
+                <div class="border-t border-slate-800/80 pt-2 space-y-1.5">
+                    <div class="text-[11px] font-bold text-slate-400 flex items-center justify-between">
+                        <span>등록된 대상지 목록</span>
+                        <span id="target-count-badge" class="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px]">0개</span>
+                    </div>
+                    <div id="target-layer-list" class="space-y-1.5 max-h-40 overflow-y-auto">
+                        <div class="text-xs text-slate-500 text-center py-2">등록된 대상지가 없습니다.</div>
+                    </div>
                 </div>
             </div>
 
@@ -285,6 +293,14 @@
                         <div class="text-[10px] text-red-400">수인한도 불만족 비율</div>
                         <div id="stat-failed-ratio" class="text-lg font-extrabold text-red-400 mt-0.5">-</div>
                     </div>
+                </div>
+
+                <!-- 검토 유의사항 안내 문구 (정제된 표현) -->
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg text-[11px] text-slate-400 leading-relaxed space-y-1 shadow-inner">
+                    <div class="font-bold text-amber-400/90 flex items-center gap-1.5">
+                        <i class="fa-solid fa-triangle-exclamation"></i> 검토 유의사항
+                    </div>
+                    <p>본 검토 결과는 지반 고저차(레벨)를 반영하지 않은 평면 기준 시뮬레이션이므로, 그림자의 기하학적 분포 및 형태적 유형 파악 용도로만 참고하시기 바랍니다.</p>
                 </div>
 
                 <!-- 범례 -->
@@ -402,7 +418,10 @@
         let pinnedCenter = null; 
         
         let drawingMode = 'building'; // 'building' 또는 'target'
-        let targetAreaPolygon = null; // 사용자가 지정한 분석 대상지 GeoJSON Polygon
+        
+        // 다중 대상지 관리를 위한 변수
+        let drawnTargets = [];
+        let targetCounter = 0;
 
         // --- 위경도 디스플레이 업데이트 실시간 연동 함수 ---
         function updateCoordDisplay(lat, lng) {
@@ -454,6 +473,53 @@
         function updateBuildingCountBadge() {
             const badge = document.getElementById('building-count-badge');
             badge.textContent = `${drawnBuildings.length}개`;
+        }
+
+        // --- 대상지 레이어 UI 렌더링 함수 ---
+        function updateTargetLayerUI() {
+            const container = document.getElementById('target-layer-list');
+            const badge = document.getElementById('target-count-badge');
+            container.innerHTML = '';
+            badge.textContent = `${drawnTargets.length}개`;
+
+            if (drawnTargets.length === 0) {
+                container.innerHTML = `<div class="text-xs text-slate-500 text-center py-2">등록된 대상지가 없습니다.</div>`;
+                return;
+            }
+
+            drawnTargets.forEach((t, index) => {
+                const item = document.createElement('div');
+                item.className = "flex items-center justify-between bg-slate-900 border border-slate-800 p-2 rounded-lg text-xs gap-1";
+                item.innerHTML = `
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        <button class="toggle-target-vis text-${t.visible ? 'amber-400' : 'slate-500'} hover:text-white transition-colors" title="대상지 온/오프">
+                            <i class="fa-solid fa-${t.visible ? 'eye' : 'eye-slash'}"></i>
+                        </button>
+                        <span class="font-bold text-white truncate">${t.name}</span>
+                    </div>
+                    <button class="delete-target text-red-400 hover:text-red-300 p-1 transition-colors" title="대상지 삭제" data-index="${index}">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                `;
+
+                item.querySelector('.toggle-target-vis').addEventListener('click', () => {
+                    t.visible = !t.visible;
+                    if (t.visible) {
+                        if (!targetLayerGroup.hasLayer(t.layer)) t.layer.addTo(targetLayerGroup);
+                    } else {
+                        if (targetLayerGroup.hasLayer(t.layer)) targetLayerGroup.removeLayer(t.layer);
+                    }
+                    updateTargetLayerUI();
+                });
+
+                item.querySelector('.delete-target').addEventListener('click', () => {
+                    targetLayerGroup.removeLayer(t.layer);
+                    drawnTargets.splice(index, 1);
+                    updateTargetLayerUI();
+                });
+
+                container.appendChild(item);
+            });
         }
 
         // --- 측정점 중심 격자 생성 엔진 ---
@@ -618,7 +684,6 @@
                     updateShadowsForCurrentTime();
                 });
 
-                // 실시간 input 이벤트로 수정하여 100 입력 즉시 불투명도 반영
                 item.querySelector('.building-opacity-input').addEventListener('input', (e) => {
                     let val = parseInt(e.target.value);
                     if (isNaN(val)) val = 50;
@@ -682,15 +747,15 @@
             map.pm.enableDraw('Polygon', { snappable: true });
         });
 
-        // 4단계 대상지 초기화 버튼 핸들러
+        // 4단계 대상지 전체 초기화 버튼 핸들러
         document.getElementById('btn-clear-target').addEventListener('click', () => {
-            targetAreaPolygon = null;
             targetLayerGroup.clearLayers();
-            document.getElementById('target-status').textContent = '지정된 대상지 없음 (전체 영역 분석)';
-            document.getElementById('target-status').className = 'text-[11px] text-slate-400 font-mono bg-slate-900 p-2 rounded border border-slate-800 truncate';
+            drawnTargets = [];
+            targetCounter = 0;
+            updateTargetLayerUI();
         });
 
-        // 분석 결과만 초기화 버튼 핸들러 (건물 레이어는 유지하고 누적 그림자 및 분석 마커/대시보드만 초기화)
+        // 분석 결과만 초기화 버튼 핸들러
         document.getElementById('btn-clear-analysis').addEventListener('click', () => {
             analysisLayerGroup.clearLayers();
             all17ShadowsLayerGroup.clearLayers();
@@ -712,15 +777,14 @@
             buildingCounter = 0;
             all17ShadowLayers = [];
             pinnedCenter = null;
-            targetAreaPolygon = null;
+            
+            drawnTargets = [];
+            targetCounter = 0;
+            updateTargetLayerUI();
             
             // 압정 버튼 상태 초기화
             pinBtn.className = "bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 p-1.5 rounded border border-slate-800 transition-colors text-xs shadow";
             pinBtn.title = "현재 지도 중심 위치에 압정 고정";
-
-            // 대상지 상태 초기화
-            document.getElementById('target-status').textContent = '지정된 대상지 없음 (전체 영역 분석)';
-            document.getElementById('target-status').className = 'text-[11px] text-slate-400 font-mono bg-slate-900 p-2 rounded border border-slate-800 truncate';
 
             updateBuildingLayerUI();
             document.getElementById('result-dashboard').classList.add('hidden');
@@ -736,11 +800,13 @@
                 document.getElementById('modal-height-input').value = "30";
                 document.getElementById('height-modal').classList.remove('hidden');
             } else if (drawingMode === 'target') {
-                targetAreaPolygon = layer.toGeoJSON();
+                const polygonGeoJSON = layer.toGeoJSON();
                 map.removeLayer(layer);
                 
-                targetLayerGroup.clearLayers();
-                L.geoJSON(targetAreaPolygon, {
+                targetCounter++;
+                const targetName = `대상지-${targetCounter}`;
+
+                const targetLayer = L.geoJSON(polygonGeoJSON, {
                     pane: 'targetPane',
                     style: {
                         color: '#f59e0b',
@@ -752,9 +818,15 @@
                     }
                 }).addTo(targetLayerGroup);
 
-                const statusEl = document.getElementById('target-status');
-                statusEl.textContent = '분석 대상지 지정 완료 (영역 내 분석 활성화)';
-                statusEl.className = 'text-[11px] text-amber-400 font-mono bg-amber-950/40 p-2 rounded border border-amber-900/50 truncate font-bold';
+                drawnTargets.push({
+                    id: targetCounter,
+                    name: targetName,
+                    layer: targetLayer,
+                    geoJSON: polygonGeoJSON,
+                    visible: true
+                });
+
+                updateTargetLayerUI();
             }
         });
 
@@ -1039,10 +1111,18 @@
                     const centerCoord = cellObj.center; 
                     const pt = turf.point(centerCoord); 
 
-                    if (targetAreaPolygon) {
-                        if (!turf.booleanPointInPolygon(pt, targetAreaPolygon)) {
-                            continue; 
+                    // 다중 대상지 영역 필터링 검증
+                    const activeTargets = drawnTargets.filter(t => t.visible);
+                    if (drawnTargets.length > 0) {
+                        if (activeTargets.length === 0) continue; 
+                        let isInAnyTarget = false;
+                        for (let tIdx = 0; tIdx < activeTargets.length; tIdx++) {
+                            if (turf.booleanPointInPolygon(pt, activeTargets[tIdx].geoJSON)) {
+                                isInAnyTarget = true;
+                                break;
+                            }
                         }
+                        if (!isInAnyTarget) continue;
                     }
 
                     let isInsideBuilding = false;
